@@ -31,20 +31,20 @@ func NewTransport(upstream http.RoundTripper) (*Transport, error) {
 	return &Transport{upstream, jar}, nil
 }
 
-func (t Transport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.Header.Get("User-Agent") == "" {
-		r.Header.Set("User-Agent", userAgent)
+func (t Transport) RoundTrip(rOrigin *http.Request) (*http.Response, error) {
+	if rOrigin.Header.Get("User-Agent") == "" {
+		rOrigin.Header.Set("User-Agent", userAgent)
 	}
 
-	resp, err := t.upstream.RoundTrip(r)
+	resp, err := t.upstream.RoundTrip(rOrigin)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check if Cloudflare anti-bot is on
-	if resp.StatusCode == 503 && resp.Header.Get("Server") == "cloudflare" {
-		log.Printf("Solving challenge for %s", resp.Request.URL.Hostname())
-		resp, err := t.solveChallenge(resp)
+	if resp.StatusCode == 503 && (resp.Header.Get("Server") == "cloudflare" || resp.Header.Get("Server") == "cloudflare-nginx") {
+		log.Printf("DDoS protection activated! Solving challenge for %s", resp.Request.URL.Hostname())
+		resp, err := t.solveChallenge(resp, rOrigin)
 
 		return resp, err
 	}
@@ -55,7 +55,7 @@ func (t Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 var jschlRegexp = regexp.MustCompile(`name="jschl_vc" value="(\w+)"`)
 var passRegexp = regexp.MustCompile(`name="pass" value="(.+?)"`)
 
-func (t Transport) solveChallenge(resp *http.Response) (*http.Response, error) {
+func (t Transport) solveChallenge(resp *http.Response, origin *http.Request) (*http.Response, error) {
 	time.Sleep(time.Second * 4) // Cloudflare requires a delay before solving the challenge
 
 	b, err := ioutil.ReadAll(resp.Body)
@@ -132,7 +132,7 @@ var jsReplace3Regexp = regexp.MustCompile(`[\n\\']`)
 func (t Transport) extractJS(body string) (string, error) {
 	matches := jsRegexp.FindStringSubmatch(body)
 	if len(matches) == 0 {
-		return "", errors.New("No matching javascript found")
+		return "", errors.New("no matching javascript found")
 	}
 
 	js := matches[1]
